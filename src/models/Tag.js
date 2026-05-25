@@ -17,6 +17,8 @@ const testTagSchema = new mongoose.Schema({
     subCategory: { type: String, required: true },
     description: { type: String, default: null },
 
+    ownerPhoneNumber: { type: String, required: true },
+
     itemImageUrl: { type: tagImageSchema, default: null },
 
     // Status controls for UI toggles
