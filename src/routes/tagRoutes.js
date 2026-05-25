@@ -6,3 +6,5 @@ router.post('/tags', tagController.createTag);
 router.get('/tags/public/:tagId', tagController.getPublicTag);
 
 module.exports = router;
+
+

@@ -37,11 +37,14 @@ exports.createTag = async (req, res) => {
         const targetScanUrl = `${baseDomain}/scan/${tagId}`;
 
         // Generate QR code PNG into a buffer stream using exact structural encoding specifications
+
+
         const qrBuffer = qr.imageSync(targetScanUrl, {
             type: 'png',
             margin: 4,
             size: 10,
-            parse_url: true // Tells generator engine to write lowercase web markers
+            ec_level: 'M',      // Medium error correction (highly recommended for URLs)
+            mode: 'byte'        // CRITICAL: Forces binary byte mode, preventing automatic uppercase transformation!
         });
 
         // Upload generated QR buffer directly to ImageKit
