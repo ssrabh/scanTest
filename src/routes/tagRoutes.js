@@ -11,3 +11,4 @@ router.get('/tags/public/:tagId', tagController.getPublicTag);
 router.post('/communications/sms', communicationController.sendMaskedSMS);
 
 module.exports = router;
+
