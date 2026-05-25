@@ -34,7 +34,7 @@ exports.createTag = async (req, res) => {
 
 
         // Generate QR code PNG into a buffer stream
-        const qrBuffer = qr.imageSync(targetScanUrl, { type: 'png', margin: 4, size: 10 });
+        const qrBuffer = qr.imageSync(targetScanUrl, { type: 'png', margin: 4, size: 10, parse_url: true });
 
         // Upload generated QR buffer directly to ImageKit
         const qrUploadResponse = await imagekit.upload({
