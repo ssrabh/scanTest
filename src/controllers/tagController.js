@@ -28,10 +28,13 @@ exports.createTag = async (req, res) => {
         const existingTag = await TestTag.findOne({ tagId });
         if (existingTag) return res.status(400).json({ error: "Tag ID already taken" });
 
-        const targetScanUrl = `${process.env.PUBLIC_SCAN_BASE_URL}/${tagId}`;
+        const targetScanUrl = `${process.env.PUBLIC_SCAN_BASE_URL}/${tagId.toLowerCase().trim()}`;
+
+
+
 
         // Generate QR code PNG into a buffer stream
-        const qrBuffer = qr.imageSync(targetScanUrl, { type: 'png', margin: 2 });
+        const qrBuffer = qr.imageSync(targetScanUrl, { type: 'png', margin: 4, size: 10 });
 
         // Upload generated QR buffer directly to ImageKit
         const qrUploadResponse = await imagekit.upload({
