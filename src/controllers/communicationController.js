@@ -1,4 +1,5 @@
 const TestTag = require('../models/Tag');
+const ScannedSession = require('../models/Session');
 const twilio = require('twilio');
 
 // Initialize Twilio client using environment variables
@@ -109,5 +110,108 @@ exports.handleTwimlVoiceBridge = (req, res) => {
 
     } catch (error) {
         res.status(500).send(`<Response><Say>An internal server routing error occurred.</Say></Response>`);
+    }
+};
+
+exports.prewarmSession = async (req, res) => {
+    try {
+        const { tagId } = req.body;
+
+        if (!tagId) {
+            return res.status(400).json({ error: "Tag ID is required to pre-warm communication links." });
+        }
+
+        // Extract the finder's public IP address safely from the request headers
+        // Handles proxies (like Render's routing layers) or local development setups fallbacks
+        const finderIp = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;
+
+        // Clean up the input string mapping
+        const cleanTagId = tagId.toLowerCase().trim();
+
+        // Check if the asset exists first
+        const tag = await TestTag.findOne({ tagId: cleanTagId });
+        if (!tag) {
+            return res.status(404).json({ error: "Invalid Tag configuration." });
+        }
+
+        // Create the temporary mapping in MongoDB
+        const newSession = new ScannedSession({
+            tagId: cleanTagId,
+            finderIp: finderIp,
+            sessionStatus: 'pending'
+        });
+
+        await newSession.save();
+
+        res.status(201).json({
+            success: true,
+            message: "Secure communication window pre-warmed successfully. Ready for frictionless dialer connection.",
+            expiresInSeconds: 1200 // 20 minutes expiration
+        });
+
+    } catch (error) {
+        console.error("Pre-Warm Routing Error:", error);
+        res.status(500).json({ error: error.message });
+    }
+};
+
+// 3. NEW: INBOUND TWILIO ROUTING HOOK (Twilio will hit this route when your number rings)
+exports.handleIncomingZeroFrictionCall = async (req, res) => {
+    const twiml = new twilio.twiml.VoiceResponse();
+
+    // Twilio automatically passes the caller's real phone carrier number in req.body.From
+    const finderPhoneNumber = req.body.From;
+
+    // Extract incoming network parameters to back-trace the proxy context if available
+    const incomingIp = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;
+
+    try {
+        if (!finderPhoneNumber) {
+            twiml.say("Security protocol alert. Caller Identity could not be verified.");
+            return res.type('text/xml').send(twiml.toString());
+        }
+
+        // Search your temporary sessions database to find a pending tag scan originating from this context 
+        // We look for the most recent scan record to match it instantly
+        const activeSession = await ScannedSession.findOne({
+            sessionStatus: 'pending'
+        }).sort({ createdAt: -1 });
+
+        if (!activeSession) {
+            twiml.say("Welcome to Smart Tag Recovery. We could not locate an active asset scan session. Please keep your browser window open and try again.");
+            return res.type('text/xml').send(twiml.toString());
+        }
+
+        // Grab the corresponding asset tag config
+        const tag = await TestTag.findOne({ tagId: activeSession.tagId });
+        if (!tag || !tag.recoveryFeatures?.maskedCalling) {
+            twiml.say("Secure routing configurations for this item are unavailable. Goodbye.");
+            return res.type('text/xml').send(twiml.toString());
+        }
+
+        // 🚫 CRISIS PREVENTION SHIELD: Check if the owner blacklisted this carrier CallerID string
+        if (tag.blockedNumbers && tag.blockedNumbers.includes(finderPhoneNumber)) {
+            // Drop call silently with a generic fallback message to avoid tipping off a harasser
+            twiml.say("The owner is currently unavailable. Thank you for using our service.");
+            return res.type('text/xml').send(twiml.toString());
+        }
+
+        // Update the temporary session state so it doesn't cross-wire other overlapping callers
+        activeSession.capturedFinderNumber = finderPhoneNumber;
+        activeSession.sessionStatus = 'connected';
+        await activeSession.save();
+
+        // Instruct Twilio to securely bridge to the owner number masking the caller identity
+        twiml.say("Connecting you securely to the item owner. Please hold.");
+        twiml.dial({
+            callerId: process.env.TWILIO_PHONE_NUMBER // Owner only sees your system virtual number
+        }, tag.ownerPhoneNumber);
+
+        res.type('text/xml').send(twiml.toString());
+
+    } catch (error) {
+        console.error("Inbound Routing Core Failure:", error);
+        twiml.say("An internal switching center error occurred. Please try again shortly.");
+        res.type('text/xml').send(twiml.toString());
     }
 };

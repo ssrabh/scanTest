@@ -33,9 +33,16 @@ const testTagSchema = new mongoose.Schema({
         },
     },
 
+    blockedNumbers: {
+        type: [String],
+        default: []
+    },
+
     scanUrl: { type: String, default: null },
     qrCodeImage: { type: tagImageSchema, default: null }
 }, { timestamps: true });
 
 module.exports = mongoose.model('TestTag', testTagSchema);
+
+
 
