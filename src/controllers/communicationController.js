@@ -45,3 +45,69 @@ exports.sendMaskedSMS = async (req, res) => {
     }
 };
 
+
+// 1. INITIATE THE MASKED CALL (Triggered by Flutter Web)
+exports.makeMaskedCall = async (req, res) => {
+    try {
+        const { tagId, finderPhoneNumber } = req.body;
+
+        if (!tagId || !finderPhoneNumber) {
+            return res.status(400).json({ error: "Tag ID and finder phone number are required" });
+        }
+
+        // Find the tag to get the hidden owner number
+        const tag = await TestTag.findOne({ tagId: tagId.toLowerCase().trim() });
+        if (!tag) return res.status(404).json({ error: "Tag not found" });
+
+        if (!tag.recoveryFeatures?.maskedCalling) {
+            return res.status(400).json({ error: "Voice calling is disabled for this tag" });
+        }
+
+        // Encode the owner's phone number safely into the URL so our webhook can read it later
+        const encodedOwnerNum = encodeURIComponent(tag.ownerPhoneNumber);
+
+        // This is the public URL Render gives you. Twilio will hit this endpoint to get instructions.
+        const backendDomain = process.env.PUBLIC_BACKEND_URL || "https://scantest-7m40.onrender.com";
+        const twimlCallbackUrl = `${backendDomain}/api/communications/voice-bridge?ownerPhone=${encodedOwnerNum}`;
+
+        // Step A: Twilio dials the Finder first
+        const call = await client.calls.create({
+            url: twimlCallbackUrl, // The instructions Twilio executes when the finder answers
+            to: finderPhoneNumber,  // The Finder's number typed into the web form
+            from: process.env.TWILIO_PHONE_NUMBER // Your Twilio Virtual Number
+        });
+
+        res.status(200).json({
+            success: true,
+            message: "Voice bridge initiated. Calling the finder first.",
+            callSid: call.sid
+        });
+
+    } catch (error) {
+        console.error("Twilio Voice Initialization Error:", error);
+        res.status(500).json({ error: error.message });
+    }
+};
+
+// 2. TWIML INSTRUCTION WEBHOOK (Triggered automatically by Twilio's servers)
+exports.handleTwimlVoiceBridge = (req, res) => {
+    try {
+        const ownerPhone = req.query.ownerPhone;
+
+        // Construct the TwiML XML response mapping instructions back to Twilio
+        const twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
+        <Response>
+            <Say voice="alice">Connecting you to the item owner securely. Please hold.</Say>
+            <Dial callerId="${process.env.TWILIO_PHONE_NUMBER}">
+                <Number>${ownerPhone}</Number>
+            </Dial>
+        </Response>`;
+
+        // Set the header to XML so Twilio parses it correctly
+        res.type('text/xml');
+        res.send(twimlResponse);
+
+    } catch (error) {
+        res.status(500).send(`<Response><Say>An internal server routing error occurred.</Say></Response>`);
+    }
+};
