@@ -3,7 +3,6 @@ const imagekit = require('../config/imagekit');
 const qr = require('qr-image');
 
 // DTO Response transformation utility
-
 const toPublicTagDTO = (tag) => {
     const t = tag.toObject ? tag.toObject() : tag;
     return {
@@ -22,19 +21,28 @@ const toPublicTagDTO = (tag) => {
 // 1. CREATE TAG (Generates QR automatically and uploads to ImageKit)
 exports.createTag = async (req, res) => {
     try {
-        const { tagId, title, category, subCategory, description, messageForFinder, maskedCalling, maskedMessaging, itemImageBase64 } = req.body;
+        const { title, category, subCategory, description, messageForFinder, maskedCalling, maskedMessaging, itemImageBase64 } = req.body;
+
+        // CRITICAL FIX 1: Enforce strict lowercase handling for tagId on initialization
+        const tagId = req.body.tagId ? req.body.tagId.toLowerCase().trim() : '';
+
+        if (!tagId) return res.status(400).json({ error: "Tag ID is required" });
 
         // Check if tagId already exists
         const existingTag = await TestTag.findOne({ tagId });
         if (existingTag) return res.status(400).json({ error: "Tag ID already taken" });
 
-        const targetScanUrl = `${process.env.PUBLIC_SCAN_BASE_URL}/${tagId.toLowerCase().trim()}`;
+        // CRITICAL FIX 2: Explicitly inject the mandatory /scan router directory parameter path segment
+        const baseDomain = process.env.PUBLIC_SCAN_BASE_URL.replace(/\/$/, ""); // Strips trailing slash if any
+        const targetScanUrl = `${baseDomain}/scan/${tagId}`;
 
-
-
-
-        // Generate QR code PNG into a buffer stream
-        const qrBuffer = qr.imageSync(targetScanUrl, { type: 'png', margin: 4, size: 10, parse_url: true });
+        // Generate QR code PNG into a buffer stream using exact structural encoding specifications
+        const qrBuffer = qr.imageSync(targetScanUrl, {
+            type: 'png',
+            margin: 4,
+            size: 10,
+            parse_url: true // Tells generator engine to write lowercase web markers
+        });
 
         // Upload generated QR buffer directly to ImageKit
         const qrUploadResponse = await imagekit.upload({
@@ -47,7 +55,7 @@ exports.createTag = async (req, res) => {
         let finalItemImageUrl = null;
         if (itemImageBase64) {
             const itemUploadResponse = await imagekit.upload({
-                file: itemImageBase64, // Base64 string format data
+                file: itemImageBase64,
                 fileName: `item_${tagId}.png`,
                 folder: '/smart_tags/items'
             });
@@ -59,7 +67,7 @@ exports.createTag = async (req, res) => {
 
         // Build Document
         const newTag = new TestTag({
-            tagId,
+            tagId, // Saved uniformly in lowercase
             title,
             category,
             subCategory,
@@ -87,7 +95,10 @@ exports.createTag = async (req, res) => {
 // 2. PUBLIC FETCH ENDPOINT (Used directly by your Flutter web application view)
 exports.getPublicTag = async (req, res) => {
     try {
-        const tag = await TestTag.findOne({ tagId: req.params.tagId });
+        // CRITICAL FIX 3: Clean incoming endpoint parameters so capitalization variances never break matching operations
+        const searchTagId = req.params.tagId.toLowerCase().trim();
+
+        const tag = await TestTag.findOne({ tagId: searchTagId });
         if (!tag) return res.status(404).json({ message: "Tag configuration not found" });
 
         res.status(200).json(toPublicTagDTO(tag));
