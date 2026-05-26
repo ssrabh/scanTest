@@ -215,3 +215,45 @@ exports.handleIncomingZeroFrictionCall = async (req, res) => {
         res.type('text/xml').send(twiml.toString());
     }
 };
+
+// 4. NEW: ANONYMOUS BLOCK VIA SESSION ID (Triggered by the Tag Owner from their app)
+exports.blockFinderBySession = async (req, res) => {
+    try {
+        const { sessionId } = req.body; // Sent from Owner's Flutter Dashboard App
+
+        if (!sessionId) {
+            return res.status(400).json({ error: "Session ID is required to execute a block operation." });
+        }
+
+        // 1. Locate the historic scan session data
+        const session = await ScannedSession.findById(sessionId);
+        if (!session) {
+            return res.status(404).json({ error: "Communication record not found." });
+        }
+
+        // Check if a finder phone number was actually captured during this session
+        if (!session.capturedFinderNumber) {
+            return res.status(400).json({ error: "No active phone carrier interaction was logged for this session." });
+        }
+
+        // 2. Secretly append the captured finder number to the owner's tag blacklist array
+        // $addToSet ensures the number is only added once, even if clicked multiple times
+        const updateResult = await TestTag.updateOne(
+            { tagId: session.tagId },
+            { $addToSet: { blockedNumbers: session.capturedFinderNumber } }
+        );
+
+        // 3. Mark the session as completed/closed
+        session.sessionStatus = 'completed';
+        await session.save();
+
+        res.status(200).json({
+            success: true,
+            message: "The finder has been blocked anonymously. They can no longer route calls to this tag."
+        });
+
+    } catch (error) {
+        console.error("Anonymous Blocking Error:", error);
+        res.status(500).json({ error: error.message });
+    }
+};

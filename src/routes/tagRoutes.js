@@ -22,5 +22,8 @@ router.post('/communications/prewarm', communicationController.prewarmSession);
 // Replace your old voice routing lines with this entry:
 router.post('/communications/incoming-voice', communicationController.handleIncomingZeroFrictionCall);
 
+// Add this route to your existing routes/tagRoutes.js file
+router.post('/communications/block-session', communicationController.blockFinderBySession);
+
 module.exports = router;
 
