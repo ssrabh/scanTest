@@ -14,7 +14,8 @@ router.post('/communications/sms', communicationController.sendMaskedSMS);
 router.post('/communications/call', communicationController.makeMaskedCall);
 
 // Webhook route that Twilio's servers call automatically to fetch the TwiML XML script
-router.post('/communications/voice-bridge', communicationController.handleTwimlVoiceBridge);
+// router.post('/communications/voice-bridge', communicationController.handleTwimlVoiceBridge);
+router.get('/communications/voice-bridge', communicationController.handleTwimlVoiceBridge);
 
 // Add this alongside your other communication endpoints
 router.post('/communications/prewarm', communicationController.prewarmSession);

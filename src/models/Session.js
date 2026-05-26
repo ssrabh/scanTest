@@ -31,3 +31,4 @@ const scannedSessionSchema = new mongoose.Schema({
 
 module.exports = mongoose.model('ScannedSession', scannedSessionSchema);
 
+

@@ -13,6 +13,7 @@ app.use(cors());
 
 // Increase payload limit for raw image uploads
 app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
 
 // 2. Define your Rate Limiting Rule
 const publicApiLimiter = rateLimit({
@@ -37,4 +38,5 @@ mongoose.connect(process.env.MONGO_URI)
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Test server running on port ${PORT}`));
+
 
