@@ -8,7 +8,11 @@ const communicationController = require('../controllers/communicationController'
 // ==========================================
 
 // Create a brand new smart asset tag record
-router.post('/tags', tagController.createTag);
+router.post(
+    '/tags',
+    tagController.uploadMiddleware,
+    tagController.createTag
+);
 
 // Fetch public, filtered tag profile for the Next.js scanner frontend
 router.get('/tags/public/:tagId', tagController.getPublicTag);
@@ -22,6 +26,8 @@ router.put(
     tagController.uploadMiddleware,
     tagController.uploadItemImage
 );
+
+
 
 
 // ==========================================
