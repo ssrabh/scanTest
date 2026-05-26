@@ -1,19 +1,18 @@
-
+const multer = require('multer');
 const TestTag = require('../models/Tag');
 const imagekit = require('../config/imagekit');
 const qr = require('qr-image');
-const crypto = require('crypto'); // 1. Import Node's built-in crypto module
+const crypto = require('crypto');
 
 // Helper Utility: Generates a secure, short, random 6-character alphanumeric slug
 const generateSecureSlug = (length = 6) => {
-    // Generates random cryptographically strong bytes and converts to hex string
     return crypto.randomBytes(Math.ceil(length / 2))
         .toString('hex')
         .slice(0, length)
         .toLowerCase();
 };
 
-// DTO Response transformation utility
+// DTO Response transformation utility for public views
 const toPublicTagDTO = (tag) => {
     const t = tag.toObject ? tag.toObject() : tag;
     return {
@@ -29,57 +28,59 @@ const toPublicTagDTO = (tag) => {
     };
 };
 
-// 1. CREATE TAG (Generates unique secure tag ID, QR automatically, and uploads to ImageKit)
+// Multer Memory Storage Config for Multi-part form data uploads (smartphone gallery)
+const storage = multer.memoryStorage();
+exports.uploadMiddleware = multer({
+    storage: storage,
+    limits: { fileSize: 5 * 1024 * 1024 } // 5MB File size limit guard rail
+}).single('itemImage');
+
+
+// ==========================================
+// 1. CREATE TAG (Automatic QR Gen & Save)
+// ==========================================
 exports.createTag = async (req, res) => {
     try {
-        const { title, category, subCategory, description, messageForFinder, maskedCalling, maskedMessaging, itemImageBase64, ownerPhoneNumber } = req.body;
+        const {
+            title,
+            category,
+            subCategory,
+            description,
+            messageForFinder,
+            maskedCalling,
+            maskedMessaging,
+            ownerPhoneNumber
+        } = req.body;
 
-        // 2. CRITICAL CHANGE: If tagId is provided in req.body, use it (cleaned). 
-        // If NOT provided, automatically generate a secure unique 6-character slug!
+        // Auto-generate clean 6-character secure tag slug
         let tagId = req.body.tagId ? req.body.tagId.toLowerCase().trim() : generateSecureSlug(6);
 
-        // Double check uniqueness just in case of a highly unlikely collision
+        // Deduplication loop to protect index integrity
         let existingTag = await TestTag.findOne({ tagId });
         while (existingTag) {
-            tagId = generateSecureSlug(6); // Regenerate if it somehow exists
+            tagId = generateSecureSlug(6);
             existingTag = await TestTag.findOne({ tagId });
         }
 
-        // Explicitly inject the mandatory /scan router directory parameter path segment
         const baseDomain = process.env.PUBLIC_SCAN_BASE_URL.replace(/\/$/, "");
         const targetScanUrl = `${baseDomain}/scan/${tagId}`;
 
-        // Generate QR code PNG into a buffer stream using exact structural encoding specifications
+        // Build QR Buffer natively using binary safe configurations
         const qrBuffer = qr.imageSync(targetScanUrl, {
             type: 'png',
             margin: 4,
             size: 10,
             ec_level: 'M',
-            mode: 'byte' // Forces binary byte mode, preventing uppercase bugs
+            mode: 'byte'
         });
 
-        // Upload generated QR buffer directly to ImageKit
+        // Ship QR graphic to ImageKit Cloud
         const qrUploadResponse = await imagekit.upload({
             file: qrBuffer,
             fileName: `qr_${tagId}.png`,
             folder: '/smart_tags/qrs'
         });
 
-        // Optional: Handle item image upload via base64 raw string if present
-        let finalItemImageUrl = null;
-        if (itemImageBase64) {
-            const itemUploadResponse = await imagekit.upload({
-                file: itemImageBase64,
-                fileName: `item_${tagId}.png`,
-                folder: '/smart_tags/items'
-            });
-            finalItemImageUrl = {
-                url: itemUploadResponse.url,
-                fileId: itemUploadResponse.fileId
-            };
-        }
-
-        // Build Document
         const newTag = new TestTag({
             tagId,
             title,
@@ -87,7 +88,7 @@ exports.createTag = async (req, res) => {
             subCategory,
             description,
             ownerPhoneNumber,
-            itemImageUrl: finalItemImageUrl,
+            itemImageUrl: null, // Always defaults to null initially; images are handled via specialized stream route
             recoveryFeatures: {
                 maskedCalling: maskedCalling || false,
                 maskedMessaging: maskedMessaging || false,
@@ -103,21 +104,119 @@ exports.createTag = async (req, res) => {
         await newTag.save();
         res.status(201).json({ success: true, data: newTag });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ success: false, error: error.message });
     }
 };
 
-// 2. PUBLIC FETCH ENDPOINT (Used directly by your Flutter web application view)
+
+// ==========================================
+// 2. PUBLIC FETCH ENDPOINT (Used by Scanner View)
+// ==========================================
 exports.getPublicTag = async (req, res) => {
     try {
         const searchTagId = req.params.tagId.toLowerCase().trim();
 
         const tag = await TestTag.findOne({ tagId: searchTagId });
-        if (!tag) return res.status(404).json({ message: "Tag configuration not found" });
+        if (!tag) return res.status(404).json({ success: false, message: "Tag configuration not found" });
 
         res.status(200).json(toPublicTagDTO(tag));
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ success: false, error: error.message });
     }
 };
 
+
+// ==========================================
+// 3. UPDATE TAG DETAILS (Fast Textual Field Changes)
+// ==========================================
+exports.updateTag = async (req, res) => {
+    try {
+        const updateTagId = req.params.tagId.toLowerCase().trim();
+        const {
+            title,
+            description,
+            itemStatus,
+            messageForFinder,
+            maskedCalling,
+            maskedMessaging,
+            ownerPhoneNumber
+        } = req.body;
+
+        const tag = await TestTag.findOne({ tagId: updateTagId });
+        if (!tag) {
+            return res.status(404).json({ success: false, message: "Tag configuration not found" });
+        }
+
+        // Apply string field changes smoothly
+        if (title !== undefined) tag.title = title;
+        if (description !== undefined) tag.description = description;
+        if (itemStatus !== undefined) tag.itemStatus = itemStatus;
+        if (ownerPhoneNumber !== undefined) tag.ownerPhoneNumber = ownerPhoneNumber;
+
+        // Update nested structures without loss of sibling variables
+        if (!tag.recoveryFeatures) tag.recoveryFeatures = {};
+        if (messageForFinder !== undefined) tag.recoveryFeatures.messageForFinder = messageForFinder;
+        if (maskedCalling !== undefined) tag.recoveryFeatures.maskedCalling = maskedCalling;
+        if (maskedMessaging !== undefined) tag.recoveryFeatures.maskedMessaging = maskedMessaging;
+
+        await tag.save();
+        res.status(200).json({ success: true, message: "Metadata modifications stored successfully", data: tag });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+
+// ==========================================
+// 4. DEDICATED IMAGE UPLOAD (Gallery File Stream)
+// ==========================================
+exports.uploadItemImage = async (req, res) => {
+    try {
+        const { tagId } = req.params;
+        const cleanTagId = tagId.toLowerCase().trim();
+
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: "No image binary file payload attached" });
+        }
+
+        const tag = await TestTag.findOne({ tagId: cleanTagId });
+        if (!tag) {
+            return res.status(404).json({ success: false, message: "Tag configuration not found" });
+        }
+
+        // Clean up step: Remove obsolete file entry from cloud space to mitigate bloat
+        if (tag.itemImageUrl && tag.itemImageUrl.fileId) {
+            try {
+                await imagekit.deleteFile(tag.itemImageUrl.fileId);
+            } catch (deleteError) {
+                console.warn("Storage engine cleanup skipped:", deleteError.message);
+            }
+        }
+
+        // Upload the direct incoming binary data stream
+        const uploadResponse = await imagekit.upload({
+            file: req.file.buffer,
+            fileName: `gallery_item_${cleanTagId}.png`,
+            folder: '/smart_tags/items'
+        });
+
+        // Map fresh structural paths directly onto database records
+        tag.itemImageUrl = {
+            url: uploadResponse.url,
+            fileId: uploadResponse.fileId
+        };
+
+        await tag.save();
+
+        res.status(200).json({
+            success: true,
+            message: "Gallery media file linked successfully",
+            data: {
+                itemImageUrl: tag.itemImageUrl.url,
+                fileId: tag.itemImageUrl.fileId
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
