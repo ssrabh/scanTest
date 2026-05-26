@@ -36,8 +36,9 @@ exports.uploadMiddleware = multer({
 }).single('itemImage');
 
 
+
 // ==========================================
-// 1. CREATE TAG (Automatic QR Gen & Save)
+// 1. CREATE TAG (Automatic QR Gen & Save with Binary File Support)
 // ==========================================
 exports.createTag = async (req, res) => {
     try {
@@ -81,6 +82,20 @@ exports.createTag = async (req, res) => {
             folder: '/smart_tags/qrs'
         });
 
+        // 🌟 FIX: Check for the binary file stream via req.file instead of a base64 string
+        let finalItemImageUrl = null;
+        if (req.file) {
+            const itemUploadResponse = await imagekit.upload({
+                file: req.file.buffer, // Read directly from multer's memory buffer
+                fileName: `item_${tagId}.png`,
+                folder: '/smart_tags/items'
+            });
+            finalItemImageUrl = {
+                url: itemUploadResponse.url,
+                fileId: itemUploadResponse.fileId
+            };
+        }
+
         const newTag = new TestTag({
             tagId,
             title,
@@ -88,10 +103,10 @@ exports.createTag = async (req, res) => {
             subCategory,
             description,
             ownerPhoneNumber,
-            itemImageUrl: null, // Always defaults to null initially; images are handled via specialized stream route
+            itemImageUrl: finalItemImageUrl, // Will attach the upload object details cleanly
             recoveryFeatures: {
-                maskedCalling: maskedCalling || false,
-                maskedMessaging: maskedMessaging || false,
+                maskedCalling: maskedCalling === 'true' || maskedCalling === true,
+                maskedMessaging: maskedMessaging === 'true' || maskedMessaging === true,
                 messageForFinder: messageForFinder || undefined
             },
             scanUrl: targetScanUrl,
